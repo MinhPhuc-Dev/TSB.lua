@@ -1,99 +1,185 @@
-local b64 = function(s) return game:HttpGet(('data:text/plain;base64,'..s):sub(24)) end
-local a = loadstring
-local g = game
-local s, f = pcall(function()
-    return a(b64("aHR0cHM6Ly9naXRodWIuY29tL2Rhd2lkLXNjcmlwdHMvRmx1ZW50L3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC9tYWluLmx1YQ=="))()
+-- Tải thư viện giao diện Fluent
+local success, Fluent = pcall(function()
+    return loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 end)
+if not success then
+    error("Failed to load Fluent. Please check your internet connection.")
+end
 
-if not s then error("Can't load GUI") end
+-- Tạo cửa sổ chính
+local MainWindow = Fluent:CreateWindow({
+    Title = "Main Window",
+    SubTitle = "RielSick Hub",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(400, 300),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
 
-local p = g:GetService("Players")
-local w = g:GetService("Workspace")
-local r = g:GetService("RunService")
-local u = g:GetService("UserInputService")
-local t = g:GetService("TweenService")
-local v = g:GetService("VirtualInputManager")
+-- Tạo tab "Main"
+local MainTab = MainWindow:AddTab({ Title = "Main", Icon = "" })
 
-local l = p.LocalPlayer or p.PlayerAdded:Wait()
-local c = l.Character or l.CharacterAdded:Wait()
-local h = c:FindFirstChild("Humanoid") or c:WaitForChild("Humanoid")
-local d = c:FindFirstChild("HumanoidRootPart") or c:WaitForChild("HumanoidRootPart")
+-- Các biến cốt lõi
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
-local w1 = f:CreateWindow({ Title = "Main Window", SubTitle = "RielSick Hub", TabWidth = 160, Size = UDim2.fromOffset(400, 300), Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl })
-local t1 = w1:AddTab({ Title = "Main", Icon = "" })
+local localPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
-local sk, lu, e = {1,1,1,1}, {0,0,0,0}, false
+-- Ensure character and its components are initialized
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local humanoid = character:FindFirstChild("Humanoid") or character:WaitForChild("Humanoid", 10)
+if not humanoid then
+    error("Humanoid is nil. Ensure the character has a Humanoid.")
+end
 
-local us = function(i)
-    local now = os.clock()
-    if now - lu[i] >= sk[i] then
-        lu[i] = now
-        local k = Enum.KeyCode["One"]
-        if i == 2 then k = Enum.KeyCode["Two"] elseif i == 3 then k = Enum.KeyCode["Three"] elseif i == 4 then k = Enum.KeyCode["Four"] end
-        v:SendKeyEvent(true, k, false, nil)
-        v:SendKeyEvent(false, k, false, nil)
-        return true
+local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
+if not hrp then
+    error("HumanoidRootPart is nil. Ensure the character has a HumanoidRootPart.")
+end
+
+
+
+local function find_player()
+    -- Get all players in the server, avoiding the local player
+    local players = Players:GetPlayers()
+    local targetPlayer = nil
+    local lowestHealth = math.huge
+
+    for _, player in ipairs(players) do
+        if player ~= localPlayer and player.Character and player.Character:FindFirstChild("Humanoid") then
+            local humanoid = player.Character.Humanoid
+            if humanoid.Health < lowestHealth then
+                lowestHealth = humanoid.Health
+                targetPlayer = player
+            end
+        end
     end
-    return false
-end
 
-local m1 = function()
-    v:SendMouseButtonEvent(0, 0, 0, true, nil, 0)
-    v:SendMouseButtonEvent(0, 0, 0, false, nil, 0)
-end
-
-local tp = function(trg)
-    if trg and d then
-        local pos = trg.Position
-        local dir = (d.Position - pos).Unit
-        local behind = pos - dir * 5
-        d.CFrame = CFrame.new(behind, pos)
-        w.CurrentCamera.CFrame = CFrame.new(w.CurrentCamera.CFrame.Position, pos)
-        h.AutoRotate = false
-        d.CFrame = CFrame.new(d.Position, pos)
+    -- Get target player's position and print their health and name
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local targetHRP = targetPlayer.Character.HumanoidRootPart
+        print("Target player: " .. targetPlayer.Name)
+        print("Target health: " .. tostring(lowestHealth))
+        return targetHRP.Position
+    else
+        return nil
     end
 end
 
-local af = function()
-    local trg = nil
-    while e do
-        if not trg or not trg.Character or not trg.Character:FindFirstChild("Humanoid") or trg.Character.Humanoid.Health <= 0 then
-            local lh = math.huge
-            for _, pl in ipairs(p:GetPlayers()) do
-                if pl ~= l and pl.Character and pl.Character:FindFirstChild("Humanoid") then
-                    local hp = pl.Character.Humanoid
-                    if hp.Health < lh and hp.Health > 0 then
-                        lh = hp.Health
-                        trg = pl
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local skillCooldowns = {1, 1, 1, 1} -- Cooldown times for skills 1, 2, 3, and 4 in seconds
+local lastUsedTimes = {0, 0, 0, 0} -- Last used times for each skill
+local autofarmEnabled = false -- Toggle state for autofarm
+
+local function use_skill(skillIndex)
+    local currentTime = os.clock()
+    if currentTime - lastUsedTimes[skillIndex] >= skillCooldowns[skillIndex] then
+        lastUsedTimes[skillIndex] = currentTime
+        local keyCode = Enum.KeyCode["One"]
+        if skillIndex == 2 then keyCode = Enum.KeyCode["Two"]
+        elseif skillIndex == 3 then keyCode = Enum.KeyCode["Three"]
+        elseif skillIndex == 4 then keyCode = Enum.KeyCode["Four"] end
+
+        -- Simulate pressing the key for the skill
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, nil)
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, nil)
+        return true -- Skill was used
+    end
+    return false -- Skill was not used
+end
+
+local function smart_m1()
+    -- Simulate a left mouse click
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, nil, 0)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, nil, 0)
+end
+
+local function teleport_behind_target(targetHRP)
+    if targetHRP and hrp then
+        local targetPosition = targetHRP.Position
+        local direction = (hrp.Position - targetPosition).Unit
+        local behindPosition = targetPosition - direction * 5 -- Stay 5 studs behind the target
+
+        -- Instantly teleport behind the target
+        hrp.CFrame = CFrame.new(behindPosition, targetPosition)
+
+        -- Make the camera face the target
+        Workspace.CurrentCamera.CFrame = CFrame.new(Workspace.CurrentCamera.CFrame.Position, targetPosition)
+
+        -- Make the body face the target
+        humanoid.AutoRotate = false
+        hrp.CFrame = CFrame.new(hrp.Position, targetPosition)
+    end
+end
+
+local function autofarm()
+    local targetPlayer = nil -- Keep track of the current target
+
+    while autofarmEnabled do
+        -- Check if the current target is valid
+        if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("Humanoid") or targetPlayer.Character.Humanoid.Health <= 0 then
+            -- Find a new target if the old target is invalid or dead
+            local lowestHealth = math.huge
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= localPlayer and player.Character and player.Character:FindFirstChild("Humanoid") then
+                    local humanoid = player.Character.Humanoid
+                    if humanoid.Health < lowestHealth and humanoid.Health > 0 then
+                        lowestHealth = humanoid.Health
+                        targetPlayer = player
                     end
                 end
             end
         end
 
-        if trg and trg.Character and trg.Character:FindFirstChild("HumanoidRootPart") then
-            local th = trg.Character.HumanoidRootPart
-            tp(th)
-            local su = false
-            for i=1,4 do if us(i) then su = true end end
-            if not su then m1() end
+        -- Follow the target and perform actions
+        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetHRP = targetPlayer.Character.HumanoidRootPart
+            teleport_behind_target(targetHRP) -- Instantly teleport behind the target player
+
+            -- Perform actions on the target
+            local skillUsed = false
+            for i = 1, 4 do
+                if use_skill(i) then
+                    skillUsed = true
+                end
+            end
+
+            if not skillUsed then
+                smart_m1() -- Use M1 if no skills are available
+            end
         end
-        task.wait(0.05)
+
+        task.wait(0.05) -- Reduced delay for smoother execution
     end
 end
 
-t1:AddToggle("Tg", {
+-- Toggle for autofarm
+MainTab:AddToggle("AutofarmToggle", {
     Title = "Enable Autofarm",
     Default = false,
-    Callback = function(st)
-        e = st
-        if st then task.spawn(af) end
+    Callback = function(state)
+        autofarmEnabled = state
+        if state then
+            task.spawn(autofarm) -- Start autofarm in a separate thread
+        end
     end
 })
 
-l.CharacterAdded:Connect(function(nc)
-    c = nc
-    h = c:WaitForChild("Humanoid")
-    d = c:WaitForChild("HumanoidRootPart")
+-- Ensure the script resets after the local player dies
+localPlayer.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    hrp = character:WaitForChild("HumanoidRootPart")
 end)
 
-f:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
+-- Thông báo đã tải
+Fluent:Notify({
+    Title = "Fluent",
+    Content = "The script has been loaded.",
+    Duration = 8
+})
